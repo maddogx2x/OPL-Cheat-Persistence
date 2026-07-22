@@ -1,0 +1,32 @@
+--- a/src/opl.c	2026-07-15 12:28:00.282671257 +0000
++++ b/src/opl.c	2026-07-15 12:22:45.804728262 +0000
+@@ -956,6 +956,12 @@
+             configGetInt(configOPL, CONFIG_OPL_ENABLE_ILINK, &gEnableILK);
+             configGetInt(configOPL, CONFIG_OPL_ENABLE_MX4SIO, &gEnableMX4SIO);
+             configGetInt(configOPL, CONFIG_OPL_ENABLE_BDMHDD, &gEnableBdmHDD);
++
++            /* PSBBN internal exFAT profile: ATA games are exposed through BDM. */
++            gHDDStartMode = START_MODE_DISABLED;
++            gBDMStartMode = START_MODE_AUTO;
++            gEnableBdmHDD = 1;
++
+             configGetInt(configOPL, CONFIG_OPL_SFX, &gEnableSFX);
+             configGetInt(configOPL, CONFIG_OPL_BOOT_SND, &gEnableBootSND);
+             configGetInt(configOPL, CONFIG_OPL_BGM, &gEnableBGM);
+@@ -1760,14 +1766,14 @@
+     gXSensitivity = 1;
+     gYSensitivity = 1;
+ 
+-    gBDMStartMode = START_MODE_DISABLED;
++    gBDMStartMode = START_MODE_AUTO;
+     gHDDStartMode = START_MODE_DISABLED;
+     gETHStartMode = START_MODE_DISABLED;
+     gAPPStartMode = START_MODE_DISABLED;
+ 
+     gEnableILK = 0;
+     gEnableMX4SIO = 0;
+-    gEnableBdmHDD = 0;
++    gEnableBdmHDD = 1;
+ 
+     frameCounter = 0;
+ 
