@@ -1,0 +1,55 @@
+name: Publish complete modified source
+
+on:
+  push:
+    paths:
+      - .github/workflows/publish-complete-source.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish-source:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out project repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reconstruct modified OPL source tree
+        shell: bash
+        run: |
+          set -euxo pipefail
+          target="Open-PS2-Loader-3e3f34e-cheat-persistence"
+          work="$(mktemp -d)"
+
+          git clone https://github.com/ps2homebrew/Open-PS2-Loader.git "$work/$target"
+          git -C "$work/$target" checkout 3e3f34e9f94b058f7fd5b13727cb86e94fd3b35d
+          rm -rf "$work/$target/.git"
+
+          git -C "$work/$target" apply "$GITHUB_WORKSPACE/patches/0001-cheat-persistence-and-paging.patch"
+          git -C "$work/$target" apply "$GITHUB_WORKSPACE/patches/0002-psbbn-ata-bdm-defaults.patch"
+
+          cp README.md "$work/$target/CHEAT_PERSISTENCE_README.md"
+          rm -rf "$target"
+          mv "$work/$target" "$target"
+
+          if [ ! -f LICENSE ]; then
+            cp "$target/LICENSE" LICENSE
+          fi
+
+      - name: Commit complete source tree
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Open-PS2-Loader-3e3f34e-cheat-persistence LICENSE
+          if git diff --cached --quiet; then
+            echo "Source tree is already current."
+            exit 0
+          fi
+          git commit -m "Publish complete modified OPL source tree"
+          git push origin HEAD:main
