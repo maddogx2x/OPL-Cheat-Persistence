@@ -1,0 +1,5 @@
+Target: Open PS2 Loader v1.2.0-Beta-2245
+Base commit: 3e3f34e9f94b058f7fd5b13727cb86e94fd3b35d
+Toolchain: official ps2dev Ubuntu precompiled toolchain
+Result: source compiled and linked successfully to an unpacked MIPS PS2 opl.elf
+Note: the optional ps2-packer packaging stage was not used for this source archive.
