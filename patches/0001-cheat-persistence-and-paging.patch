@@ -1,0 +1,388 @@
+--- a/Makefile	2026-07-15 12:21:04.911100290 +0000
++++ b/Makefile	2026-07-15 12:28:01.393286375 +0000
+@@ -73,7 +73,7 @@
+ 
+ FRONTEND_OBJS = pad.o xparam.o fntsys.o renderman.o menusys.o OSDHistory.o system.o lang.o lang_internal.o config.o hdd.o dialogs.o \
+ 		dia.o ioman.o texcache.o themes.o supportbase.o bdmsupport.o ethsupport.o hddsupport.o zso.o lz4.o \
+-		appsupport.o gui.o guigame.o vmc_groups.o textures.o opl.o atlas.o nbns.o httpclient.o gsm.o cheatman.o sound.o ps2cnf.o
++		appsupport.o gui.o guigame.o vmc_groups.o textures.o opl.o atlas.o nbns.o httpclient.o gsm.o cheatman.o cheatconfig.o sound.o ps2cnf.o
+ 
+ IOP_OBJS =	iomanx.o filexio.o ps2fs.o usbd.o bdmevent.o \
+ 		bdm.o bdmfs_fatfs.o usbmass_bd.o iLinkman.o IEEE1394_bd.o mx4sio_bd.o \
+--- a/include/config.h	2026-07-15 12:21:04.954774483 +0000
++++ b/include/config.h	2026-07-15 12:22:45.801061082 +0000
+@@ -55,6 +55,7 @@
+ #define CONFIG_ITEM_CHEATSSOURCE "$CheatsSource"
+ #define CONFIG_ITEM_ENABLECHEAT  "$EnableCheat"
+ #define CONFIG_ITEM_CHEATMODE    "$CheatMode"
++#define CONFIG_ITEM_CHEAT_SELECTION_PREFIX "$CheatSel"
+ 
+ #define CONFIG_ITEM_PADEMUSOURCE     "$PADEMUSource"
+ #define CONFIG_ITEM_ENABLEPADEMU     "$EnablePadEmu"
+--- a/include/gui.h	2026-07-15 12:21:04.956180325 +0000
++++ b/include/gui.h	2026-07-15 12:22:45.801871430 +0000
+@@ -156,6 +156,6 @@
+ 
+ int guiGameShowRemoveSettings(config_set_t *configSet, config_set_t *configGame);
+ 
+-void guiManageCheats(void);
++void guiManageCheats(config_set_t *configSet);
+ 
+ #endif
+--- a/include/supportbase.h	2026-07-15 12:21:04.958392088 +0000
++++ b/include/supportbase.h	2026-07-15 12:22:45.802153360 +0000
+@@ -55,6 +55,6 @@
+ int sbProbeISO9660(const char *path, base_game_info_t *game, u32 layer1_offset);
+ int sbProbeISO9660_64(const char *path, base_game_info_t *game, u32 layer1_offset);
+ 
+-int sbLoadCheats(const char *path, const char *file);
++int sbLoadCheats(const char *path, const char *file, config_set_t *configSet);
+ 
+ #endif
+--- a/src/cheatman.c	2026-07-15 12:21:05.030838515 +0000
++++ b/src/cheatman.c	2026-07-15 12:24:32.810140000 +0000
+@@ -1,3 +1,4 @@
++#include "include/cheatconfig.h"
+ /*
+  * Manage cheat codes
+  *
+@@ -285,7 +286,7 @@
+                         cheat_index++; // Move to the next cheat entry
+                         strncpy(gCheats[cheat_index].name, temp_name, CHEAT_NAME_MAX);
+                         gCheats[cheat_index].name[CHEAT_NAME_MAX] = NUL;
+-                        gCheats[cheat_index].enabled = 1; // Set cheat as enabled
++                        gCheats[cheat_index].enabled = (gCheatMode == 0) || cheatConfigIsMasterCode(gCheats[cheat_index].name); // Auto mode enables all; select mode enables required code only
+                         temp_name[0] = NUL;               // Clear temp_name after use
+                     }
+                     // Add the cheat code to the current cheat entry
+--- a/src/gui.c	2026-07-15 12:21:05.033938704 +0000
++++ b/src/gui.c	2026-07-15 12:25:03.989390865 +0000
+@@ -1,3 +1,4 @@
++#include "include/cheatconfig.h"
+ /*
+  Copyright 2010, Volca
+  Licenced under Academic Free License version 3.0
+@@ -1845,16 +1846,19 @@
+     return 1;
+ }
+ 
+-void guiManageCheats(void)
++void guiManageCheats(config_set_t *configSet)
+ {
+     int offset = 0;
+     int terminate = 0;
+     int cheatCount = 0;
+     int selectedCheat = 0;
+-    int visibleCheats = 10; // Maximum number of cheats visible on screen
++    const int visibleCheats = 10;
++    unsigned char originalStates[MAX_CODES];
+ 
+-    while (cheatCount < MAX_CODES && strlen(gCheats[cheatCount].name) > 0)
++    while (cheatCount < MAX_CODES && strlen(gCheats[cheatCount].name) > 0) {
++        originalStates[cheatCount] = gCheats[cheatCount].enabled;
+         cheatCount++;
++    }
+ 
+     sfxPlay(SFX_MESSAGE);
+ 
+@@ -1863,22 +1867,51 @@
+         readPads();
+ 
+         if (getKeyOn(KEY_UP) && selectedCheat > 0) {
+-            selectedCheat -= 1;
++            selectedCheat--;
+             if (selectedCheat < offset)
+-                offset = selectedCheat;
++                offset = (selectedCheat / visibleCheats) * visibleCheats;
+         }
+ 
+         if (getKeyOn(KEY_DOWN) && selectedCheat < cheatCount - 1) {
+-            selectedCheat += 1;
++            selectedCheat++;
+             if (selectedCheat >= offset + visibleCheats)
+-                offset = selectedCheat - visibleCheats + 1;
++                offset = (selectedCheat / visibleCheats) * visibleCheats;
++        }
++
++        if (getKeyOn(KEY_LEFT) && offset > 0) {
++            offset -= visibleCheats;
++            if (offset < 0)
++                offset = 0;
++            selectedCheat = offset;
++            sfxPlay(SFX_CURSOR);
++        }
++
++        if (getKeyOn(KEY_RIGHT) && offset + visibleCheats < cheatCount) {
++            offset += visibleCheats;
++            if (offset >= cheatCount)
++                offset = ((cheatCount - 1) / visibleCheats) * visibleCheats;
++            selectedCheat = offset;
++            sfxPlay(SFX_CURSOR);
+         }
+ 
+         if (getKeyOn(gSelectButton)) {
+-            if (!(strncasecmp(gCheats[selectedCheat].name, "mastercode", 10) == 0 || strncasecmp(gCheats[selectedCheat].name, "master code", 11) == 0))
++            if (!cheatConfigIsMasterCode(gCheats[selectedCheat].name)) {
+                 gCheats[selectedCheat].enabled = !gCheats[selectedCheat].enabled;
++                sfxPlay(SFX_CONFIRM);
++            }
+         }
+ 
++        /* Save selections without launching and keep the selector open. */
++        if (getKeyOn(KEY_SQUARE)) {
++            int i;
++            cheatConfigSaveSelections(configSet);
++            configWrite(configSet);
++            for (i = 0; i < cheatCount; i++)
++                originalStates[i] = gCheats[i].enabled;
++            sfxPlay(SFX_CONFIRM);
++        }
++
++        /* Save and continue with game launch. */
+         if (getKeyOn(KEY_START))
+             terminate = 1;
+ 
+@@ -1896,7 +1929,6 @@
+                 continue;
+ 
+             int enabled = gCheats[i].enabled;
+-
+             int boxX = 50;
+             int boxY = 100 + (renderedCheats * 30);
+             int boxWidth = rmWideScale(25);
+@@ -1909,15 +1941,23 @@
+ 
+             u32 textColour = (i == selectedCheat) ? gTheme->selTextColor : gTheme->textColor;
+             fntRenderString(gTheme->fonts[0], boxX + 35, boxY + 3, ALIGN_LEFT, 0, 0, gCheats[i].name, textColour);
+-
+             renderedCheats++;
+         }
+ 
+-        guiDrawIconAndText(gSelectButton == KEY_CIRCLE ? CIRCLE_ICON : CROSS_ICON, _STR_SELECT, gTheme->fonts[0], 70, 417, gTheme->selTextColor);
+-        guiDrawIconAndText(START_ICON, _STR_RUN, gTheme->fonts[0], 500, 417, gTheme->selTextColor);
++        char pageText[32];
++        int pageCount = (cheatCount + visibleCheats - 1) / visibleCheats;
++        int currentPage = (offset / visibleCheats) + 1;
++        snprintf(pageText, sizeof(pageText), "%d / %d", currentPage, pageCount > 0 ? pageCount : 1);
++        fntRenderString(gTheme->fonts[0], screenWidth >> 1, 390, ALIGN_CENTER, 0, 0, pageText, gTheme->textColor);
++
++        guiDrawIconAndText(gSelectButton == KEY_CIRCLE ? CIRCLE_ICON : CROSS_ICON, _STR_SELECT, gTheme->fonts[0], 50, 417, gTheme->selTextColor);
++        guiDrawIconAndText(SQUARE_ICON, _STR_SAVE_CHANGES, gTheme->fonts[0], 205, 417, gTheme->selTextColor);
++        guiDrawIconAndText(START_ICON, _STR_RUN, gTheme->fonts[0], 430, 417, gTheme->selTextColor);
+ 
+         guiEndFrame();
+     }
+ 
++    cheatConfigSaveSelections(configSet);
++    configWrite(configSet);
+     sfxPlay(SFX_CONFIRM);
+-}
++}
+--- a/src/supportbase.c	2026-07-15 12:21:05.038553779 +0000
++++ b/src/supportbase.c	2026-07-15 12:24:32.808684659 +0000
+@@ -11,6 +11,7 @@
+ #include "include/cheatman.h"
+ #include "include/ps2cnf.h"
+ #include "include/gui.h"
++#include "include/cheatconfig.h"
+ 
+ #define NEWLIB_PORT_AWARE
+ #include <fileXio_rpc.h> // fileXioMount("iso:", ***), fileXioUmount("iso:")
+@@ -828,7 +829,7 @@
+         sbCreateFoldersFromList(path, discImgFolders);
+ }
+ 
+-int sbLoadCheats(const char *path, const char *file)
++int sbLoadCheats(const char *path, const char *file, config_set_t *configSet)
+ {
+     char cheatfile[64];
+     int cheatMode = 0;
+@@ -841,8 +842,13 @@
+             LOG("Error: failed to load cheats\n");
+         else {
+             LOG("Cheats found\n");
+-            if ((gAutoLaunchGame == NULL) && (gAutoLaunchBDMGame == NULL) && (cheatMode == 1))
+-                guiManageCheats();
++            if (cheatMode == 1) {
++                cheatConfigLoadSelections(configSet);
++
++                /* PSBBN auto-launch restores saved choices silently. */
++                if ((gAutoLaunchGame == NULL) && (gAutoLaunchBDMGame == NULL))
++                    guiManageCheats(configSet);
++            }
+         }
+     }
+ 
+--- a/src/hddsupport.c	2026-07-15 12:21:05.034940987 +0000
++++ b/src/hddsupport.c	2026-07-15 12:22:45.803384599 +0000
+@@ -557,7 +557,7 @@
+ 
+     sbPrepare(NULL, configSet, size_irx, irx, &i);
+ 
+-    if ((result = sbLoadCheats(gHDDPrefix, game->startup)) < 0) {
++    if ((result = sbLoadCheats(gHDDPrefix, game->startup, configSet)) < 0) {
+         if (gAutoLaunchGame == NULL) {
+             switch (result) {
+                 case -ENOENT:
+--- a/src/bdmsupport.c	2026-07-15 12:21:05.030623200 +0000
++++ b/src/bdmsupport.c	2026-07-15 12:22:45.803797998 +0000
+@@ -492,7 +492,7 @@
+     // adjust ZSO cache
+     settings->common.zso_cache = bdmCacheSize;
+ 
+-    if ((result = sbLoadCheats(pDeviceData->bdmPrefix, game->startup)) < 0) {
++    if ((result = sbLoadCheats(pDeviceData->bdmPrefix, game->startup, configSet)) < 0) {
+         if (gAutoLaunchBDMGame == NULL) {
+             switch (result) {
+                 case -ENOENT:
+--- a/src/ethsupport.c	2026-07-15 12:21:05.032888078 +0000
++++ b/src/ethsupport.c	2026-07-15 12:22:45.804256965 +0000
+@@ -637,7 +637,7 @@
+ 
+     compatmask = sbPrepare(game, configSet, size_smb_cdvdman_irx, smb_cdvdman_irx, &i);
+ 
+-    if ((result = sbLoadCheats(ethPrefix, game->startup)) < 0) {
++    if ((result = sbLoadCheats(ethPrefix, game->startup, configSet)) < 0) {
+         switch (result) {
+             case -ENOENT:
+                 guiWarning(_l(_STR_NO_CHEATS_FOUND), 10);
+--- /dev/null	2026-07-15 09:12:29.885485932 +0000
++++ b/include/cheatconfig.h	2026-07-15 12:22:45.801356197 +0000
+@@ -0,0 +1,15 @@
++#ifndef _CHEATCONFIG_H_
++#define _CHEATCONFIG_H_
++
++#include "cheatman.h"
++
++/* Returns non-zero for standardized required-code headings. */
++int cheatConfigIsMasterCode(const char *name);
++
++/* Reset optional cheats to off, then restore enabled entries by normalized name. */
++void cheatConfigLoadSelections(config_set_t *configSet);
++
++/* Save enabled optional cheats as numbered per-game CFG values. */
++void cheatConfigSaveSelections(config_set_t *configSet);
++
++#endif /* _CHEATCONFIG_H_ */
+--- /dev/null	2026-07-15 09:12:29.885485932 +0000
++++ b/src/cheatconfig.c	2026-07-15 12:22:45.801495818 +0000
+@@ -0,0 +1,119 @@
++#include "cheatconfig.h"
++#include "config.h"
++
++#include <ctype.h>
++#include <stdio.h>
++#include <string.h>
++
++#define CHEAT_SELECTION_KEY_MAX CONFIG_KEY_NAME_LEN
++
++static void normalizeCheatName(const char *source, char *destination, size_t destinationSize)
++{
++    size_t output = 0;
++    int pendingSpace = 0;
++
++    if (destinationSize == 0)
++        return;
++
++    while (*source != NUL && isspace((unsigned char)*source))
++        source++;
++
++    while (*source != NUL && output + 1 < destinationSize) {
++        unsigned char character = (unsigned char)*source++;
++
++        if (isspace(character)) {
++            pendingSpace = output > 0;
++            continue;
++        }
++
++        if (pendingSpace && output + 1 < destinationSize) {
++            destination[output++] = SPACE;
++            pendingSpace = 0;
++        }
++
++        destination[output++] = tolower(character);
++    }
++
++    destination[output] = NUL;
++}
++
++int cheatConfigIsMasterCode(const char *name)
++{
++    char normalized[CHEAT_NAME_MAX + 1];
++
++    normalizeCheatName(name, normalized, sizeof(normalized));
++
++    return strcmp(normalized, "mastercode") == 0 ||
++           strcmp(normalized, "master code") == 0 ||
++           strcmp(normalized, "enable code (must be on)") == 0;
++}
++
++static int cheatNamesMatch(const char *first, const char *second)
++{
++    char normalizedFirst[CHEAT_NAME_MAX + 1];
++    char normalizedSecond[CHEAT_NAME_MAX + 1];
++
++    normalizeCheatName(first, normalizedFirst, sizeof(normalizedFirst));
++    normalizeCheatName(second, normalizedSecond, sizeof(normalizedSecond));
++
++    return strcmp(normalizedFirst, normalizedSecond) == 0;
++}
++
++void cheatConfigLoadSelections(config_set_t *configSet)
++{
++    int cheatIndex;
++    int selectionIndex;
++    char key[CHEAT_SELECTION_KEY_MAX];
++    char savedName[CONFIG_KEY_VALUE_LEN];
++
++    /* First use is safe: required code on, every optional code off. */
++    for (cheatIndex = 0; cheatIndex < MAX_CODES && gCheats[cheatIndex].name[0] != NUL; cheatIndex++)
++        gCheats[cheatIndex].enabled = cheatConfigIsMasterCode(gCheats[cheatIndex].name);
++
++    if (configSet == NULL)
++        return;
++
++    for (selectionIndex = 0; selectionIndex < MAX_CODES; selectionIndex++) {
++        snprintf(key, sizeof(key), "%s%03d", CONFIG_ITEM_CHEAT_SELECTION_PREFIX, selectionIndex);
++
++        if (!configGetStrCopy(configSet, key, savedName, sizeof(savedName)))
++            break;
++
++        for (cheatIndex = 0; cheatIndex < MAX_CODES && gCheats[cheatIndex].name[0] != NUL; cheatIndex++) {
++            if (!cheatConfigIsMasterCode(gCheats[cheatIndex].name) &&
++                cheatNamesMatch(gCheats[cheatIndex].name, savedName)) {
++                gCheats[cheatIndex].enabled = 1;
++                break;
++            }
++        }
++    }
++
++    /* Database changes must never leave the required code disabled. */
++    for (cheatIndex = 0; cheatIndex < MAX_CODES && gCheats[cheatIndex].name[0] != NUL; cheatIndex++) {
++        if (cheatConfigIsMasterCode(gCheats[cheatIndex].name))
++            gCheats[cheatIndex].enabled = 1;
++    }
++}
++
++void cheatConfigSaveSelections(config_set_t *configSet)
++{
++    int cheatIndex;
++    int selectionIndex = 0;
++    char key[CHEAT_SELECTION_KEY_MAX];
++
++    if (configSet == NULL)
++        return;
++
++    /* Clear stale numbered values from earlier selections. */
++    for (cheatIndex = 0; cheatIndex < MAX_CODES; cheatIndex++) {
++        snprintf(key, sizeof(key), "%s%03d", CONFIG_ITEM_CHEAT_SELECTION_PREFIX, cheatIndex);
++        configRemoveKey(configSet, key);
++    }
++
++    for (cheatIndex = 0; cheatIndex < MAX_CODES && gCheats[cheatIndex].name[0] != NUL; cheatIndex++) {
++        if (gCheats[cheatIndex].enabled && !cheatConfigIsMasterCode(gCheats[cheatIndex].name)) {
++            snprintf(key, sizeof(key), "%s%03d", CONFIG_ITEM_CHEAT_SELECTION_PREFIX, selectionIndex++);
++            configSetStr(configSet, key, gCheats[cheatIndex].name);
++        }
++    }
++}
